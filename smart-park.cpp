@@ -108,7 +108,7 @@ void setup() {
   pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
 
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
-
+ 
   timer.setInterval(1500L, []() { poll(); });
 }
 
