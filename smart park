@@ -1,0 +1,118 @@
+#define BLYNK_TEMPLATE_ID "TMPL3mlEn6cNm"
+#define BLYNK_TEMPLATE_NAME "iot"
+#define BLYNK_AUTH_TOKEN "19t2tgGues7wNwrxO17_C5xqVg0SzPEX"
+
+/***** WiFi *****/
+char ssid[] = "70 Turbo";
+char pass[] = "SohanLM12";
+
+/***** Libraries *****/
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+BlynkTimer timer;
+
+/***** Ultrasonic pins *****/
+// Sensor 1
+#define TRIG1 5
+#define ECHO1 26
+// Sensor 2
+#define TRIG2 32
+#define ECHO2 15
+
+/***** Settings *****/
+const int OCCUPIED_CM  = 30;  // below this → Occupied
+const int FREE_CM      = 40;  // above this → Free
+const uint8_t LED_ON   = 255;
+const uint8_t LED_OFF  = 0;
+
+// State memory
+bool s1Occupied = false;
+bool s2Occupied = false;
+bool s1LastState = false;
+bool s2LastState = false;
+
+long measureCM(uint8_t trig, uint8_t echo) {
+  digitalWrite(trig, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+
+  long dur = pulseIn(echo, HIGH, 25000UL);
+  if (dur == 0) return -1;
+  long cm = dur * 0.034 / 2;
+  return cm;
+}
+
+int avgDistance(uint8_t trig, uint8_t echo, uint8_t samples = 5) {
+  long sum = 0; int good = 0;
+  for (uint8_t i = 0; i < samples; i++) {
+    long d = measureCM(trig, echo);
+    if (d > 0) { sum += d; good++; }
+    delay(30);
+  }
+  if (!good) return -1;
+  return (int)(sum / good);
+}
+
+void updateSlot(uint8_t trig, uint8_t echo,
+                bool &occupiedState, bool &lastState,
+                const char* slotName,
+                uint8_t vpinText, uint8_t vpinLed, uint8_t vpinDist) {
+  int dist = avgDistance(trig, echo);
+
+  if (vpinDist) Blynk.virtualWrite(vpinDist, dist < 0 ? 0 : dist);
+
+  if (dist < 0) {
+    Blynk.virtualWrite(vpinText, "Sensor Error");
+    if (lastState != occupiedState) {
+      Serial.print(slotName);
+      Serial.println(": Sensor Error");
+    }
+    return;
+  }
+
+  // Hysteresis
+  if (occupiedState) {
+    if (dist > FREE_CM) occupiedState = false;
+  } else {
+    if (dist >= 0 && dist < OCCUPIED_CM) occupiedState = true;
+  }
+
+  // Push to Blynk + Serial only if status changed
+  if (occupiedState != lastState) {
+    if (occupiedState) {
+      Blynk.virtualWrite(vpinText, "Occupied");
+      Blynk.virtualWrite(vpinLed, LED_ON);
+      Serial.print(slotName);
+      Serial.println(": Occupied");
+    } else {
+      Blynk.virtualWrite(vpinText, "Available");
+      Blynk.virtualWrite(vpinLed, LED_OFF);
+      Serial.print(slotName);
+      Serial.println(": Available");
+    }
+    lastState = occupiedState;
+  }
+}
+
+void poll() {
+  updateSlot(TRIG1, ECHO1, s1Occupied, s1LastState, "Parking 1", V1, V11, V3);
+  updateSlot(TRIG2, ECHO2, s2Occupied, s2LastState, "Parking 2", V2, V12, V4);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
+  pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  timer.setInterval(1500L, []() { poll(); });
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
